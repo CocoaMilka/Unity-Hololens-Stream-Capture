@@ -10,6 +10,7 @@ using Texture2D = SharpDX.Direct3D11.Texture2D;
     using FFmpegInteropX;
     using Windows.Graphics.DirectX.Direct3D11;
     using Windows.Graphics.Imaging;
+    using Windows.Graphics.Capture;
     using Windows.Media.Playback;
 #endif
 
@@ -19,6 +20,7 @@ public class RenderStream : MonoBehaviour
     private UnityEngine.Texture2D targetX;
     private IntPtr sharedHandle;
 
+    private Texture2D sharedTexture;
     SharpDX.Direct3D11.Texture2D m_DstTexture;
     SharpDX.Direct3D11.Device device;
     SharpDX.Direct3D11.DeviceContext deviceContext;
@@ -46,6 +48,10 @@ public class RenderStream : MonoBehaviour
         deviceContext = device.ImmediateContext;
 
         // Create shared texture for FFmpeg and Unity to access
+        Texture2DDescription sharedTextureDesc = dstTextureX.Description;
+        sharedTextureDesc.OptionFlags = SharpDX.Direct3D11.ResourceOptionFlags.Shared;
+        m_DstTexture = new SharpDX.Direct3D11.Texture2D(device, sharedTextureDesc);
+        /*
         Texture2DDescription sharedTextureDesc = new SharpDX.Direct3D11.Texture2DDescription
         {
             Width = 512,
@@ -59,16 +65,38 @@ public class RenderStream : MonoBehaviour
             CpuAccessFlags = SharpDX.Direct3D11.CpuAccessFlags.None,
             OptionFlags = SharpDX.Direct3D11.ResourceOptionFlags.Shared
         };
+        */
         // Textures are stored on GPU vram, surfaces are stored in ram
-        Texture2D sharedTexture = new SharpDX.Direct3D11.Texture2D(device, sharedTextureDesc);
+        sharedTexture = new SharpDX.Direct3D11.Texture2D(device, sharedTextureDesc);
         surfaceX = sharedTexture.QueryInterface<Surface>();
 
-        #if ENABLE_WINMD_SUPPORT
-            Debug.Log("Converting SharpDX Surface to IDirect3DSurface");
-            // Converts SharpDX Surface into Direct3DSurface
-            direct3DSurface = Direct3D11Helpers.CreateDirect3DSurfaceFromSharpDXTexture(sharedTexture);
-        #endif
+        SharpDX.Direct3D11.ShaderResourceViewDescription rvdesc = new SharpDX.Direct3D11.ShaderResourceViewDescription
+        {
+            Format = sharedTextureDesc.Format,
+            Dimension = SharpDX.Direct3D.ShaderResourceViewDimension.Texture2D
+        };
+        rvdesc.Texture2D.MostDetailedMip = 0;
+        rvdesc.Texture2D.MipLevels = 1;
+        SharpDX.Direct3D11.ShaderResourceView rvptr = new SharpDX.Direct3D11.ShaderResourceView(
+            device,
+            m_DstTexture, rvdesc);
 
+        targetX = UnityEngine.Texture2D.CreateExternalTexture(sharedTextureDesc.Width, sharedTextureDesc.Height, UnityEngine.TextureFormat.BGRA32, false, false, rvptr.NativePointer);
+
+        var sharedResourceDst = m_DstTexture.QueryInterface<SharpDX.DXGI.Resource>();
+        var sharedTexDst = device.OpenSharedResource<SharpDX.Direct3D11.Texture2D>(sharedResourceDst.SharedHandle);
+
+
+#if ENABLE_WINMD_SUPPORT
+        Debug.Log("Converting SharpDX Surface to IDirect3DSurface");
+        // Converts SharpDX Surface into Direct3DSurface
+        //direct3DSurface = Direct3DInterop.CreateDirect3DSurfaceFromDXGISurface(sharedTexture);
+        //Direct3DInterop.CreateDirect3DSurfaceFromDXGISurface(sharedTexture.NativePointer, out direct3DSurface);
+        //Direct3D11Helper.Create3DSurfaceFromHandle(texturePtr);
+#endif
+
+
+        /*
         // Get shared handle from Direct3D texture
         Resource resource = sharedTexture.QueryInterface<SharpDX.DXGI.Resource>();
         sharedHandle = resource.SharedHandle;
@@ -78,6 +106,7 @@ public class RenderStream : MonoBehaviour
 
         // Assign updated texture to RawImage
         target.texture = targetX;
+        */
 
         // Init ffmpeg for streaming
 
@@ -164,7 +193,7 @@ public class RenderStream : MonoBehaviour
             //sender.CopyFrameToVideoSurface(surface);
             sender.CopyFrameToVideoSurface(direct3DSurface);
             // Notify Unity to update the texture with the new content.
-            targetX.UpdateExternalTexture(sharedHandle);
+            //targetX.UpdateExternalTexture(sharedHandle);
         }
         catch (Exception ex)
         {
@@ -179,4 +208,6 @@ public class RenderStream : MonoBehaviour
     {
         
     }
+
+
 }
